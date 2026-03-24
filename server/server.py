@@ -1,7 +1,9 @@
+from pathlib import Path
 import pickle
 import socket
 
 from models.packet import Packet
+from models.utils import Message
 
 class Server:
     def __init__(self, server_ip: str, port: int):
@@ -20,8 +22,12 @@ class Server:
             original_object: Packet= pickle.loads(data)
 
             print(f"Received Data from {client_address}: {vars(original_object)}")
-            response_message = b'Hello, Client!'
-            serverSocket.sendto(response_message, client_address)
+
+            response_packet = b'Hello, Client!'
+            if not Path(f"./files/{original_object.payload}").exists():
+                response_packet = pickle.dumps(Packet(original_object.connection_id, seq_num=0, msg_type=Message.ERROR, payload=None))
+
+            serverSocket.sendto(response_packet, client_address)
 
         serverSocket.close()
         print("UDP Server closed")
