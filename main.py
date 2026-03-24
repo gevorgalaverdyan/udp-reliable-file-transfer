@@ -1,35 +1,38 @@
+import argparse
 import sys
+import threading
 
 from client.client import Client
+from server.server import Server
 
 def main():
-    print("UDP program: \n")
+    print("***************")
+    print("* UDP program *")
+    print("***************\n")
 
-    if len(sys.argv) > 1:
-        print(f"Arguments passed: {sys.argv[1:]}")
-    
+    parser = argparse.ArgumentParser(description="UDP Client Program")
+    parser.add_argument("-i", "--server_ip",                   required=True, metavar="IP",    help="IP address of the server")
+    parser.add_argument("-p", "--port",        type=int,       required=True, metavar="PORT",  help="Port number (1-65535)")
+    parser.add_argument("-f", "--filename",                    required=True, metavar="FILE",  help="Name of the file to transfer")
+    parser.add_argument("-m", "--max_payload", type=int,       required=True, metavar="BYTES", help="Maximum payload size in bytes")
+
+    args = parser.parse_args()
+
+    if not (1 <= args.port <= 65535):
+        parser.error(f"Port must be between 1 and 65535, got {args.port}")
+    if args.max_payload <= 0:
+        parser.error(f"Max payload must be a positive integer, got {args.max_payload}")
+
+    client = Client(args.server_ip, args.port, args.filename, args.max_payload)
+    server = Server(args.server_ip, args.port)
+
+    server_thread = threading.Thread(target=server.start_listener, daemon=True)
+    server_thread.start()
+
+    client.start_sending() 
 
     return 0
 
-def parse_input(args: list[str]):
-    required_input = {
-        "server_ip": None,
-        "port": None,
-        "filename": None,
-        "max_payload": None,
-    }
 
-    if len(required_input!=len(args)):
-        print("Not enough parameters")
-        return
-
-    for arg in args:
-        if not required_input[arg]:
-            print(f"Extra input {arg} ignored")
-        else:
-            required_input[0]
-
-    # return Client()
-    
 if __name__ == "__main__":
     sys.exit(main())

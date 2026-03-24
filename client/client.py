@@ -1,6 +1,23 @@
+import socket
+
 class Client:
     def __init__(self, server_ip: str, port: int, filename: str, max_payload: int):
         self.server_ip = server_ip
         self.port = port
         self.filename = filename
         self.max_payload = max_payload
+
+    def start_sending(self):
+        clientSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        print(f"UDP Client is sending to {self.server_ip}:{self.port}\n")
+
+        try:
+            while True:
+                clientSocket.sendto(b"hello from client", (self.server_ip, self.port))
+                response, _ = clientSocket.recvfrom(1024)
+                print(f"Received response: {response.decode()}")
+        except KeyboardInterrupt:
+            clientSocket.sendto(b"exit", (self.server_ip, self.port))
+            print("\nUDP Client closed")
+        finally:
+            clientSocket.close()
