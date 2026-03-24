@@ -1,4 +1,7 @@
+import pickle
 import socket
+
+from models.packet import Packet
 
 class Server:
     def __init__(self, server_ip: str, port: int):
@@ -12,10 +15,11 @@ class Server:
         print(f"UDP Server is listening on {self.server_ip}:{self.port}")
         while True:
             data, client_address = serverSocket.recvfrom(1024)
-            if data.decode() == 'exit':
-                break
-            print(f"Received Data from {client_address}: {data.decode()}")
-            
+            # if data.decode() == 'exit':
+            #     break
+            original_object: Packet= pickle.loads(data)
+
+            print(f"Received Data from {client_address}: {vars(original_object)}")
             response_message = b'Hello, Client!'
             serverSocket.sendto(response_message, client_address)
 

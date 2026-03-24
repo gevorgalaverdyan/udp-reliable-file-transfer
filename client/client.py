@@ -1,4 +1,9 @@
+import pickle
 import socket
+from uuid import uuid4
+
+from models.packet import Packet
+from models.utils import Message
 
 class Client:
     def __init__(self, server_ip: str, port: int, filename: str, max_payload: int):
@@ -13,7 +18,8 @@ class Client:
 
         try:
             while True:
-                clientSocket.sendto(b"hello from client", (self.server_ip, self.port))
+                p = pickle.dumps(Packet(uuid4(), 0, Message.REQUEST, payload="file1.txt"))
+                clientSocket.sendto(p, (self.server_ip, self.port))
                 response, _ = clientSocket.recvfrom(1024)
                 print(f"Received response: {response.decode()}")
         except KeyboardInterrupt:
