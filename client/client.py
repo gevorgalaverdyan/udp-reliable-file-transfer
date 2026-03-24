@@ -18,13 +18,17 @@ class Client:
 
         try:
             while True:
-                p = pickle.dumps(Packet(uuid4(), 0, Message.REQUEST, payload="file1.txt"))
+                p = pickle.dumps(Packet(uuid4(), 0, Message.REQUEST, payload="none"))
                 clientSocket.sendto(p, (self.server_ip, self.port))
                 response, _ = clientSocket.recvfrom(1024)
 
                 original_object: Packet= pickle.loads(response)
 
+                if original_object.msg_type == Message.ERROR:
+                    pass
+
                 print(f"Received response: {vars(original_object)}")
+                break
         except KeyboardInterrupt:
             clientSocket.sendto(b"exit", (self.server_ip, self.port))
             print("\nUDP Client closed")
