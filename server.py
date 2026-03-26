@@ -59,53 +59,65 @@ def run_server(port: int, segment_size: int, serve_dir: str):
             file_content = f.read()
 
         chunks = split_into_chunks(file_content, segment_size)
-
         server_seq_num = 0
-        first_chunk = chunks[0]
-        is_final = len(chunks) == 1
+        sock.settimeout(2)
 
-        data_packet = pack_packet(
-            connection_id,
-            server_seq_num,
-            MESSAGE_TYPES.DATA,
-            is_final,
-            first_chunk,
-        )
-        sock.sendto(data_packet, client_addr)
-        log(
-            f"Sent first DATA packet: seq={server_seq_num}, "
-            f"bytes={len(first_chunk)}, is_final={is_final}"
-        )
+        for idx, chunk in enumerate(chunks):
+            is_final = (idx == len(chunks) - 1)
 
-        ack_raw, ack_addr = sock.recvfrom(65535)
-        ack_packet = unpack_packet(ack_raw)
-
-        if ack_addr != client_addr:
-            log(f"ERROR: ACK came from unexpected sender {ack_addr}")
-            return
-
-        if not ack_packet:
-            log("ERROR: malformed ACK received")
-            return
-
-        ack_conn_id, ack_seq, ack_type, _, _ = ack_packet
-
-        if ack_conn_id != connection_id:
-            log("ERROR: ACK connection_id does not match")
-            return
-
-        if ack_type != MESSAGE_TYPES.ACK:
-            log(f"ERROR: expected ACK, got {ack_type.name}")
-            return
-
-        if ack_seq != server_seq_num:
-            log(
-                f"ERROR: ACK sequence number mismatch "
-                f"(got {ack_seq}, expected {server_seq_num})"
+            data_packet = pack_packet(
+                connection_id,
+                server_seq_num,
+                MESSAGE_TYPES.DATA,
+                is_final,
+                chunk,
             )
-            return
 
-        log("First packet acknowledged successfully")
+            while True:
+                sock.sendto(data_packet, client_addr)
+                log(
+                    f"Sent {idx}-th DATA packet: seq={server_seq_num}, "
+                    f"bytes={len(chunk)}, is_final={is_final}"
+                )
+                try:
+                    ack_raw, ack_addr = sock.recvfrom(65535)
+                    ack_packet = unpack_packet(ack_raw)
+                except socket.timeout:
+                    log(f"Timeout waiting for ACK for seq={server_seq_num}, retransmitting")
+                    continue
+
+                if ack_addr != client_addr:
+                    log(f"ERROR: ACK came from unexpected sender {ack_addr}")
+                    continue
+
+                if not ack_packet:
+                    log("ERROR: malformed ACK received")
+                    continue
+
+                ack_conn_id, ack_seq, ack_type, _, _ = ack_packet
+
+                if ack_conn_id != connection_id:
+                    log("ERROR: ACK connection_id does not match")
+                    continue
+
+                if ack_type != MESSAGE_TYPES.ACK:
+                    log(f"ERROR: expected ACK, got {ack_type.name}")
+                    continue
+
+                if ack_seq != server_seq_num:
+                    log(
+                        f"ERROR: ACK sequence number mismatch "
+                        f"(got {ack_seq}, expected {server_seq_num})"
+                    )
+                    continue
+
+                log(f"ACK received for packet {idx} (seq={server_seq_num})")
+                break
+            
+            if is_final:
+                log("Transmission complete")
+                return
+            server_seq_num ^= 1
 
     finally:
         sock.close()

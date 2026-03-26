@@ -21,65 +21,158 @@ def rcv_file(server_ip: str, port: int, filename: str, segment_size: int):
 
     log(f"Connection ID: {conn_id}")
     log(
-        f"Requesting '{filename}' from {server_ip}:{port}  "
+        f"Requesting '{filename}' from {server_ip}:{port} "
         f"(segment_size={segment_size})"
     )
 
     req_packet = pack_packet(
         conn_id, 0, MESSAGE_TYPES.REQUEST, False, filename.encode()
     )
-    sock.sendto(req_packet, server_addr)
 
     expected_seq = 0
+    sock.settimeout(2)
 
-    with open(path_to_output, "wb") as f:    
-        while True:
-            raw_data, addr = sock.recvfrom(65535)
+    try:
+        first_packet = None
+        first_addr = None
+
+        for attempt in range(1, 4):
+            sock.sendto(req_packet, server_addr)
+            log(f"Sent REQUEST attempt {attempt}")
+
+            try:
+                raw_data, addr = sock.recvfrom(65535)
+            except socket.timeout:
+                log("Timeout waiting for first response, retrying...")
+                continue
+
             packet = unpack_packet(raw_data)
+            if not packet:
+                log("Ignoring malformed first packet")
+                continue
 
             if addr != server_addr:
-                log("ERROR: sender addr validation failed")
-                return
-            
-            if not packet:
-                log("ERROR: malformed packet received")
-                return
+                log(f"Ignoring packet from unexpected sender {addr}")
+                continue
 
-            connection_id, sequence_number, message_type, is_final, payload = packet
-            if connection_id != conn_id:
+            recv_conn_id, sequence_number, message_type, is_final, payload = packet
+
+            if recv_conn_id != conn_id:
                 log(
-                    f"ERROR: connection ids not equal received={connection_id} expecting={conn_id}"
+                    f"Ignoring packet with wrong connection id "
+                    f"(got {recv_conn_id}, expected {conn_id})"
+                )
+                continue
+
+            first_packet = packet
+            first_addr = addr
+            break
+
+        if first_packet is None:
+            log("ERROR: server did not respond after 3 attempts")
+            return
+
+        recv_conn_id, sequence_number, message_type, is_final, payload = first_packet
+
+        if message_type == MESSAGE_TYPES.ERROR:
+            log(f"MESSAGE ERROR: {payload.decode('utf-8')}")
+            return
+
+        if message_type != MESSAGE_TYPES.DATA:
+            log(f"Unexpected first packet type: {message_type.name}")
+            return
+
+        with open(path_to_output, "wb") as f:
+            log(
+                f"RECEIVED: seq={sequence_number}, "
+                f"payload_size={len(payload)}, is_final={is_final}"
+            )
+
+            if sequence_number != expected_seq:
+                log(
+                    f"Unexpected first sequence number {sequence_number}, "
+                    f"expected {expected_seq}"
                 )
                 return
 
-            if message_type == MESSAGE_TYPES.ERROR:
-                log(f"MESSAGE ERROR: {payload.decode('utf-8')}")
+            f.write(payload)
+
+            ack_packet = pack_packet(
+                conn_id, sequence_number, MESSAGE_TYPES.ACK, False, b""
+            )
+            sock.sendto(ack_packet, first_addr)
+
+            if is_final:
+                log("****************************************")
+                log("Final packet received, transfer complete")
+                log("****************************************")
                 return
-            elif message_type == MESSAGE_TYPES.DATA:
+
+            expected_seq ^= 1
+
+            while True:
+                try:
+                    raw_data, addr = sock.recvfrom(65535)
+                except socket.timeout:
+                    log("Timeout waiting for DATA packet")
+                    return
+
+                packet = unpack_packet(raw_data)
+
+                if not packet:
+                    log("Ignoring malformed packet")
+                    continue
+
+                if addr != server_addr:
+                    log(f"Ignoring packet from unexpected sender {addr}")
+                    continue
+
+                recv_conn_id, sequence_number, message_type, is_final, payload = packet
+
+                if recv_conn_id != conn_id:
+                    log(
+                        f"Ignoring packet with wrong connection id "
+                        f"(got {recv_conn_id}, expected {conn_id})"
+                    )
+                    continue
+
+                if message_type == MESSAGE_TYPES.ERROR:
+                    log(f"MESSAGE ERROR: {payload.decode('utf-8')}")
+                    return
+
+                if message_type != MESSAGE_TYPES.DATA:
+                    log(f"Ignoring unexpected packet type: {message_type.name}")
+                    continue
+
                 log(
-                    f"RECEIVED: seq={sequence_number}, payload_size={len(payload)}, is_final={is_final}"
+                    f"RECEIVED: seq={sequence_number}, "
+                    f"payload_size={len(payload)}, is_final={is_final}"
                 )
-                if sequence_number == expected_seq:
-                    f.write(payload)
 
-                    ack_packet = pack_packet(conn_id, sequence_number, MESSAGE_TYPES.ACK, False, b"") 
-                    sock.sendto(ack_packet, addr)
-                    
-                    if is_final:
-                        log("****************************************")
-                        log("Final packet received, transfer complete")
-                        log("****************************************")
-                        break
-                    
-                    expected_seq ^= 1
-                else: 
-                    log(f"Ignoring unexpected sequence number {sequence_number}, expected {expected_seq}")          
-            else:
-                log(f"Unexpected packet type: {message_type.name}")
-                return
-    sock.close()
+                if sequence_number != expected_seq:
+                    log(
+                        f"Ignoring unexpected sequence number {sequence_number}, "
+                        f"expected {expected_seq}"
+                    )
+                    continue
 
+                f.write(payload)
 
+                ack_packet = pack_packet(
+                    conn_id, sequence_number, MESSAGE_TYPES.ACK, False, b""
+                )
+                sock.sendto(ack_packet, addr)
+
+                if is_final:
+                    log("****************************************")
+                    log("Final packet received, transfer complete")
+                    log("****************************************")
+                    break
+
+                expected_seq ^= 1
+
+    finally:
+        sock.close()
 
 
 def main():
