@@ -37,7 +37,7 @@ def pack_packet(
         is_final (bool): Take as bool and transform to bit val
 
     Returns:
-        data packet in bytes
+        bytes: data packet in bytes
     """
     payload_length = len(payload)
     header = struct.pack(
@@ -57,7 +57,7 @@ def unpack_packet(data: bytes):
     Receives raw bytes, separate header|payload
 
     Returns:
-        parsed values connection_id, sequence_number, message_type, is_final, payload
+        tuple: parsed values connection_id, sequence_number, message_type, is_final, payload
     """
     if len(data) < HEADER_SIZE:
         return

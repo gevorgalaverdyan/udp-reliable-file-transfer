@@ -1,3 +1,14 @@
+"""
+1. Server starts by parsing the inputs and making sure the sending file directory exists
+2. calls run_server(...) which creates a UDP socket and starts listening
+3. Enters a persistant loop and waits. Server doesn't close after transfer is complete, it needs Keyboard interrupt 
+4. Receives packets of 65535 bytes, unpacks it to packet(header+payload)
+5. This is the first packet so it will start validating and start streaming the document. Calls handle_request
+
+6. handle_request(...): sends chunk by chunk, validates ack packet, resends on timout
+7. Final chunk: keep alive for duplicates...
+"""
+
 import argparse
 from pathlib import Path
 import socket
@@ -13,9 +24,42 @@ def log(msg: str):
 
 
 def split_into_chunks(data: bytes, chunk_size: int) -> list[bytes]:
+    """
+    Chunk the data into the passed segment size
+
+    Returns:
+        list: list of chunks
+    """
     if len(data) == 0:
         return [b""]
     return [data[i : i + chunk_size] for i in range(0, len(data), chunk_size)]
+
+
+def run_server(port: int, segment_size: int, serve_dir: str):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    try:
+        sock.bind(("", port))
+        log(f"Listening on UDP port {port}")
+
+        while True:
+            sock.settimeout(None)  # wait forever for a new REQUEST
+            raw_data, client_addr = sock.recvfrom(65535)
+            packet = unpack_packet(raw_data)
+
+            if not packet:
+                log(f"Ignoring malformed packet from {client_addr}")
+                continue
+
+            try:
+                handle_request(sock, packet, client_addr, segment_size, serve_dir)
+            except Exception as e:
+                log(f"Error while handling request from {client_addr}: {e}")
+                continue
+
+    finally:
+        sock.close()
+        log("Socket closed")
 
 
 def handle_request(
@@ -46,11 +90,14 @@ def handle_request(
     with open(file_path, "rb") as f:
         file_content = f.read()
 
+    # Split to chunks on given segment size 
     chunks = split_into_chunks(file_content, segment_size)
     server_seq_num = 0
 
+    # set timeout in case ACK is lost or timeout happens from client
     sock.settimeout(2)
 
+    # send chunk by chunk
     for idx, chunk in enumerate(chunks):
         is_final = idx == len(chunks) - 1
 
@@ -63,12 +110,14 @@ def handle_request(
         )
 
         while True:
+            # send packet
             sock.sendto(data_packet, client_addr)
             log(
                 f"Sent DATA packet {idx}: seq={server_seq_num}, "
                 f"bytes={len(chunk)}, is_final={is_final}"
             )
 
+            # wait for ACK, If timeout -> throw exception and resend packet
             try:
                 ack_raw, ack_addr = sock.recvfrom(65535)
             except socket.timeout:
@@ -77,6 +126,7 @@ def handle_request(
 
             ack_packet = unpack_packet(ack_raw)
 
+            # Validate ACK
             if ack_addr != client_addr:
                 log(f"Ignoring ACK from unexpected sender {ack_addr}")
                 continue
@@ -95,6 +145,7 @@ def handle_request(
                 log(f"Ignoring non-ACK packet while waiting for ACK: {ack_type.name}")
                 continue
 
+            # If duplicate/out of order, ignore and resend
             if ack_seq != server_seq_num:
                 log(
                     f"Ignoring ACK with wrong sequence number "
@@ -102,9 +153,11 @@ def handle_request(
                 )
                 continue
 
+            # If all good break and go to next chunk
             log(f"ACK received for packet {idx} (seq={server_seq_num})")
             break
 
+        # If final chunk has been sent, keep state and handle dupl ack/req 
         if is_final:
             log("Final packet acknowledged")
             hold_final_state(
@@ -120,33 +173,6 @@ def handle_request(
             return
 
         server_seq_num ^= 1
-
-
-def run_server(port: int, segment_size: int, serve_dir: str):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-    try:
-        sock.bind(("", port))
-        log(f"Listening on UDP port {port}")
-
-        while True:
-            sock.settimeout(None)  # wait forever for a new REQUEST
-            raw_data, client_addr = sock.recvfrom(65535)
-            packet = unpack_packet(raw_data)
-
-            if not packet:
-                log(f"Ignoring malformed packet from {client_addr}")
-                continue
-
-            try:
-                handle_request(sock, packet, client_addr, segment_size, serve_dir)
-            except Exception as e:
-                log(f"Error while handling request from {client_addr}: {e}")
-                continue
-
-    finally:
-        sock.close()
-        log("Socket closed")
 
 
 def hold_final_state(

@@ -1,3 +1,15 @@
+"""
+1. Create output file
+2. Create client socket
+3. create first packet, try establishing request with SERVER
+4. Retry attempt 4 tims with temout of 2.0s
+5. unpack first packet from server
+6. Validate that packet is DATA, open file, write data, send ack back
+    *If first is last, close connection
+7. Enter persistant loop and wait for packets
+8. Receive packet and validate
+9. If ok send ack and negate the seq num || If unexpected seq, send ACK and skip
+"""
 import argparse
 from pathlib import Path
 import random
@@ -149,6 +161,7 @@ def rcv_file(server_ip: str, port: int, filename: str, segment_size: int):
                     f"payload_size={len(payload)}, is_final={is_final}"
                 )
 
+                # if out of order/dupl ignore and send confirmation that already had received
                 if sequence_number != expected_seq:
                     log(
                         f"Duplicate/out-of-order DATA {sequence_number}, "
