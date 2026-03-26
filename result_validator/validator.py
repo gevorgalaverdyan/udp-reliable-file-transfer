@@ -40,5 +40,5 @@ def validate_X(filename:  str):
     print("Transfer was OK")
     
 if __name__ == "__main__":
-    validate_X("file1.txt")
+    validate_X("file3.txt")
     validate_all()
