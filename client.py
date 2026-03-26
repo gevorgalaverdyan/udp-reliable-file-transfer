@@ -12,7 +12,7 @@ def log(msg: str):
 
 
 def rcv_file(server_ip: str, port: int, filename: str, segment_size: int):
-    path_to_output = Path("./files/received/"+filename)
+    path_to_output = Path("./files/received") / filename
     path_to_output.parent.mkdir(parents=True, exist_ok=True)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -30,45 +30,56 @@ def rcv_file(server_ip: str, port: int, filename: str, segment_size: int):
     )
     sock.sendto(req_packet, server_addr)
 
-    raw_data, addr = sock.recvfrom(65535)
-    packet = unpack_packet(raw_data)
-
     expected_seq = 0
 
-    if not packet:
-        log("ERROR: malformed packet received")
-        return
+    with open(path_to_output, "wb") as f:    
+        while True:
+            raw_data, addr = sock.recvfrom(65535)
+            packet = unpack_packet(raw_data)
 
-    connection_id, sequence_number, message_type, is_final, payload = packet
-    if connection_id != conn_id:
-        log(
-            f"ERROR: connection ids not equal received={connection_id} expecting={conn_id}"
-        )
-        return
-
-    if message_type == MESSAGE_TYPES.ERROR:
-        log(f"MESSAGE ERROR: {payload.decode('utf-8')}")
-        return
-    elif message_type == MESSAGE_TYPES.DATA:
-        log(
-            f"RECEIVED: seq={sequence_number}, payload_size={len(payload)}, is_final={is_final}"
-        )
-        if sequence_number == expected_seq:
-            with open(path_to_output, "wb") as f:
-                f.write(payload)
-
-            ack_packet = pack_packet(conn_id, sequence_number, MESSAGE_TYPES.ACK, False, b"") 
-            sock.sendto(ack_packet, addr)
-            
-            if is_final:
+            if addr != server_addr:
+                log("ERROR: sender addr validation failed")
                 return
             
-            expected_seq ^= 1
-        else: 
-            log("ERROR: Unexpected seq number")
-    else:
-        log(f"Unexpected packet type: {message_type.name}")
-        return
+            if not packet:
+                log("ERROR: malformed packet received")
+                return
+
+            connection_id, sequence_number, message_type, is_final, payload = packet
+            if connection_id != conn_id:
+                log(
+                    f"ERROR: connection ids not equal received={connection_id} expecting={conn_id}"
+                )
+                return
+
+            if message_type == MESSAGE_TYPES.ERROR:
+                log(f"MESSAGE ERROR: {payload.decode('utf-8')}")
+                return
+            elif message_type == MESSAGE_TYPES.DATA:
+                log(
+                    f"RECEIVED: seq={sequence_number}, payload_size={len(payload)}, is_final={is_final}"
+                )
+                if sequence_number == expected_seq:
+                    f.write(payload)
+
+                    ack_packet = pack_packet(conn_id, sequence_number, MESSAGE_TYPES.ACK, False, b"") 
+                    sock.sendto(ack_packet, addr)
+                    
+                    if is_final:
+                        log("****************************************")
+                        log("Final packet received, transfer complete")
+                        log("****************************************")
+                        break
+                    
+                    expected_seq ^= 1
+                else: 
+                    log(f"Ignoring unexpected sequence number {sequence_number}, expected {expected_seq}")          
+            else:
+                log(f"Unexpected packet type: {message_type.name}")
+                return
+    sock.close()
+
+
 
 
 def main():
