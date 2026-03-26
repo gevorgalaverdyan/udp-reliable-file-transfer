@@ -151,9 +151,11 @@ def rcv_file(server_ip: str, port: int, filename: str, segment_size: int):
 
                 if sequence_number != expected_seq:
                     log(
-                        f"Ignoring unexpected sequence number {sequence_number}, "
+                        f"Duplicate/out-of-order DATA {sequence_number}, "
                         f"expected {expected_seq}"
                     )
+                    dup_ack = pack_packet(conn_id, sequence_number, MESSAGE_TYPES.ACK, False, b"")
+                    sock.sendto(dup_ack, addr)
                     continue
 
                 f.write(payload)
