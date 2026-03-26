@@ -15,10 +15,12 @@ def log(msg: str):
 def split_into_chunks(data: bytes, chunk_size: int) -> list[bytes]:
     if len(data) == 0:
         return [b""]
-    return [data[i:i + chunk_size] for i in range(0, len(data), chunk_size)]
+    return [data[i : i + chunk_size] for i in range(0, len(data), chunk_size)]
 
 
-def handle_request(sock: socket.socket, packet, client_addr, segment_size: int, serve_dir: str):
+def handle_request(
+    sock: socket.socket, packet, client_addr, segment_size: int, serve_dir: str
+):
     connection_id, request_seq, message_type, _, payload = packet
 
     if message_type != MESSAGE_TYPES.REQUEST:
@@ -50,7 +52,7 @@ def handle_request(sock: socket.socket, packet, client_addr, segment_size: int, 
     sock.settimeout(2)
 
     for idx, chunk in enumerate(chunks):
-        is_final = (idx == len(chunks) - 1)
+        is_final = idx == len(chunks) - 1
 
         data_packet = pack_packet(
             connection_id,
@@ -104,6 +106,16 @@ def handle_request(sock: socket.socket, packet, client_addr, segment_size: int, 
             break
 
         if is_final:
+            log("Final packet acknowledged")
+            hold_final_state(
+                sock=sock,
+                client_addr=client_addr,
+                connection_id=connection_id,
+                filename=filename,
+                final_seq_num=server_seq_num,
+                final_data_packet=data_packet,
+                hold_seconds=3.0,
+            )
             log("Transmission complete")
             return
 
@@ -135,6 +147,65 @@ def run_server(port: int, segment_size: int, serve_dir: str):
     finally:
         sock.close()
         log("Socket closed")
+
+
+def hold_final_state(
+    sock: socket.socket,
+    client_addr,
+    connection_id: int,
+    filename: str,
+    final_seq_num: int,
+    final_data_packet: bytes,
+    hold_seconds: float = 3.0,
+):
+    """
+    Keep the transfer state for a short time and then safely discard it
+    Re-send the final DATA packet if a duplicate ACK or duplicate REQUEST arrives
+    """
+    log(f"Holding final transfer state for {hold_seconds} seconds")
+
+    deadline = time.monotonic() + hold_seconds
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            log("Final-state hold expired, discarding transfer state")
+            return
+
+        sock.settimeout(remaining)
+
+        try:
+            raw_data, addr = sock.recvfrom(65535)
+        except socket.timeout:
+            log("Final-state hold expired, discarding transfer state")
+            return
+
+        packet = unpack_packet(raw_data)
+        if not packet:
+            continue
+
+        recv_conn_id, seq_num, msg_type, _, payload = packet
+
+        # Only care about duplicates for THIS transfer from THIS client
+        if addr != client_addr:
+            continue
+
+        if recv_conn_id != connection_id:
+            continue
+
+        if msg_type == MESSAGE_TYPES.ACK:
+            if seq_num == final_seq_num:
+                log("Duplicate ACK for final packet received, resending final DATA")
+                sock.sendto(final_data_packet, client_addr)
+
+        elif msg_type == MESSAGE_TYPES.REQUEST:
+            try:
+                requested_name = payload.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+
+            if requested_name == filename:
+                log("Duplicate REQUEST received, resending final DATA")
+                sock.sendto(final_data_packet, client_addr)
 
 
 def main():
