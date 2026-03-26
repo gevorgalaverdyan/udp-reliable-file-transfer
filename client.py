@@ -127,6 +127,8 @@ def rcv_file(server_ip: str, port: int, filename: str, segment_size: int):
                     raw_data, addr = sock.recvfrom(65535)
                 except socket.timeout:
                     log("Timeout waiting for DATA packet")
+                    # continue -> if there is a timeout dont stop, re-loop and wait for server restransmit
+                    # can add retransmit limit
                     return
 
                 packet = unpack_packet(raw_data)
