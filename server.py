@@ -217,7 +217,8 @@ def hold_final_state(
 
         if recv_conn_id != connection_id:
             continue
-
+        
+        # resend to keep in memory
         if msg_type == MESSAGE_TYPES.ACK:
             if seq_num == final_seq_num:
                 log("Duplicate ACK for final packet received, resending final DATA")
