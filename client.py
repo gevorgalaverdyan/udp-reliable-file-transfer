@@ -122,15 +122,24 @@ def rcv_file(server_ip: str, port: int, filename: str, segment_size: int):
 
             expected_seq ^= 1
 
+            data_timeouts = 0
+            max_data_timeouts = 5
+
             while True:
                 try:
                     raw_data, addr = sock.recvfrom(65535)
                 except socket.timeout:
-                    log("Timeout waiting for DATA packet")
-                    # continue -> if there is a timeout dont stop, re-loop and wait for server restransmit
+                    data_timeouts += 1
+                    log(f"Timeout waiting for DATA packet ({data_timeouts}/{max_data_timeouts})")
+                    if data_timeouts >= max_data_timeouts:
+                        log("Too many DATA timeouts, aborting transfer")
+                        return
+                    continue # -> if there is a timeout dont stop, re-loop and wait for server restransmit
                     # can add retransmit limit
-                    return
-
+                    # return will stop completely not good
+                
+                data_timeouts = 0
+                
                 packet = unpack_packet(raw_data)
 
                 if not packet:
