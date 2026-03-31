@@ -123,6 +123,9 @@ def handle_request(
             except socket.timeout:
                 log(f"Timeout waiting for ACK for seq={server_seq_num}, retransmitting")
                 continue
+                """
+                Here we retry sending infinitely, so server is stuck.  can add a retry limit
+                """
 
             ack_packet = unpack_packet(ack_raw)
 
