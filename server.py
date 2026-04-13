@@ -110,7 +110,6 @@ def handle_request(
         )
 
         while True:
-            # send packet
             sock.sendto(data_packet, client_addr)
             log(
                 f"Sent DATA packet {idx}: seq={server_seq_num}, "

@@ -12,3 +12,5 @@ python client.py 127.0.0.1 9000 test.txt --segment-size 100
 
 # compare
 cmp files/received/test.txt files/sent/test.txt
+
+# stat -c %s filename

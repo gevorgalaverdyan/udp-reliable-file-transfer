@@ -10,6 +10,13 @@ class MESSAGE_TYPES(Enum):
 
 
 """
+! = use network byte order, with standard sizes and no padding
+I = unsigned int = 4 bytes
+I = unsigned int = 4 bytes
+B = unsigned char = 1 byte
+B = unsigned char = 1 byte
+H = unsigned short = 2 bytes
+
 struct will then convert them to bytes:
 connection_id = 4 bytes → I
 sequence_number = 4 bytes → I

@@ -202,3 +202,16 @@ python3 result_validator/validator.py
 4. Confirm output in `files/received/`.
 5. Run validator or `cmp` for verification.
 
+### Flow
+1. Connection setup
+The client generates a random 32-bit conn_id, packs a REQUEST packet containing the filename, and sends it to the server. It retries up to 3 times with a 2-second timeout if it doesn't hear back.
+2. Server receives the request
+The server sits in a blocking loop (settimeout(None)) until a packet arrives. It unpacks it, confirms it's a REQUEST, and looks up the file. If the file doesn't exist, it sends back an ERROR packet and returns to listening. If it does exist, it reads the entire file into memory and splits it into fixed-size chunks based on segment_size.
+3. Data transfer (chunk by chunk)
+The server sends each chunk as a DATA packet with a sequence number that alternates between 0 and 1 (server_seq_num ^= 1). After sending, it waits for an ACK with the matching sequence number. If the ACK doesn't come within 2 seconds, it retransmits the same DATA packet indefinitely.
+On the client side, after receiving the first DATA packet successfully, it enters its own persistent loop. For each packet it validates the conn_id, sender address, message type, and sequence number. If the sequence number matches expected_seq, it writes the payload to the file, sends an ACK, and flips expected_seq. If the sequence number is wrong (duplicate/out-of-order), it still ACKs that sequence number (so the server doesn't get stuck) but doesn't write anything.
+The client also tracks consecutive timeouts — if it doesn't receive any data for 5 consecutive timeout periods, it aborts, assuming the server died.
+4. Final packet
+The last chunk is sent with is_final=True. When the client sees this flag, it writes the data, sends the ACK, and exits.
+The server, after receiving the final ACK, enters hold_final_state — it lingers for 3 seconds to handle edge cases. If the client's final ACK was lost and the client retransmits a duplicate ACK or re-sends the original REQUEST, the server re-sends the final DATA packet so the client can complete. After the hold expires, the server goes back to its main loop, ready for the next client.
+In short: client requests → server streams chunks one at a time → each chunk is ACK'd before the next is sent → alternating sequence numbers (0, 1, 0, 1…) detect duplicates → final-state hold handles lost last-ACK scenarios.

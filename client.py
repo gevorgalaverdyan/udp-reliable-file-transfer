@@ -27,6 +27,7 @@ def rcv_file(server_ip: str, port: int, filename: str, segment_size: int):
     path_to_output = Path("./files/received") / filename
     path_to_output.parent.mkdir(parents=True, exist_ok=True)
 
+    # Open Socket and instantiate conn_id and server_addr
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     conn_id = random.getrandbits(32)
     server_addr = (server_ip, port)
@@ -173,6 +174,7 @@ def rcv_file(server_ip: str, port: int, filename: str, segment_size: int):
                 )
 
                 # if out of order/dupl ignore and send confirmation that already had received
+                # send ack and go back to listen
                 if sequence_number != expected_seq:
                     log(
                         f"Duplicate/out-of-order DATA {sequence_number}, "
