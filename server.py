@@ -35,7 +35,7 @@ def split_into_chunks(data: bytes, chunk_size: int) -> list[bytes]:
     return [data[i : i + chunk_size] for i in range(0, len(data), chunk_size)]
 
 
-def run_server(port: int, segment_size: int, serve_dir: str):
+def run_server(port: int, serve_dir: str):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     try:
@@ -52,7 +52,7 @@ def run_server(port: int, segment_size: int, serve_dir: str):
                 continue
 
             try:
-                handle_request(sock, packet, client_addr, segment_size, serve_dir)
+                handle_request(sock, packet, client_addr, serve_dir)
             except Exception as e:
                 log(f"Error while handling request from {client_addr}: {e}")
                 continue
@@ -63,7 +63,7 @@ def run_server(port: int, segment_size: int, serve_dir: str):
 
 
 def handle_request(
-    sock: socket.socket, packet, client_addr, segment_size: int, serve_dir: str
+    sock: socket.socket, packet, client_addr, serve_dir: str
 ):
     connection_id, request_seq, message_type, _, payload = packet
 
@@ -71,9 +71,20 @@ def handle_request(
         log(f"Ignoring unexpected message type: {message_type.name}")
         return
 
-    filename = payload.decode("utf-8")
+    if len(payload) < 4:
+        log("Ignoring REQUEST with payload too short to contain segment size")
+        return
+
+    segment_size = int.from_bytes(payload[:4], "big")
+    filename = payload[4:].decode("utf-8")
+
+    if segment_size <= 0:
+        log(f"Ignoring REQUEST with invalid segment size: {segment_size}")
+        return
+
+    log(f"Received REQUEST for '{filename}' from {client_addr} (segment_size={segment_size})")
+
     file_path = Path(serve_dir) / filename
-    log(f"Received REQUEST for '{filename}' from {client_addr}")
 
     if not file_path.exists() or not file_path.is_file():
         error_packet = pack_packet(
@@ -227,8 +238,11 @@ def hold_final_state(
                 sock.sendto(final_data_packet, client_addr)
 
         elif msg_type == MESSAGE_TYPES.REQUEST:
+            if len(payload) < 4:
+                continue
+
             try:
-                requested_name = payload.decode("utf-8")
+                requested_name = payload[4:].decode("utf-8")
             except UnicodeDecodeError:
                 continue
 
@@ -240,18 +254,8 @@ def hold_final_state(
 def main():
     parser = argparse.ArgumentParser(description="UDP File Transfer Server")
     parser.add_argument("port", type=int, help="Server UDP port")
-    parser.add_argument(
-        "--segment-size",
-        type=int,
-        required=True,
-        help="Max file bytes per DATA packet",
-    )
 
     args = parser.parse_args()
-
-    if args.segment_size <= 0:
-        print("ERROR: --segment-size must be greater than 0")
-        sys.exit(1)
 
     serve_dir = Path("./files/sent")
     if not serve_dir.is_dir():
@@ -259,7 +263,7 @@ def main():
         sys.exit(1)
 
     try:
-        run_server(args.port, args.segment_size, str(serve_dir))
+        run_server(args.port, str(serve_dir))
     except KeyboardInterrupt:
         log("Shutting down.")
 

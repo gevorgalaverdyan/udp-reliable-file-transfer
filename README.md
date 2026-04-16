@@ -27,6 +27,11 @@ This project implements a simple but robust sender/receiver pair:
 ├── files/
 │   ├── sent/
 │   └── received/
+├── frontend/
+│   ├── app.py
+│   ├── requirements.txt
+│   └── templates/
+│       └── index.html
 ├── result_validator/
 │   └── validator.py
 └── tests/
@@ -62,7 +67,7 @@ Message types (`MESSAGE_TYPES` enum):
 
 ### Packet Rules
 
-- `REQUEST` payload: UTF-8 filename
+- `REQUEST` payload: 4-byte big-endian segment size followed by UTF-8 filename
 - `DATA` payload: file bytes for one segment
 - `ACK` payload: empty bytes (`b""`)
 - `ERROR` payload: UTF-8 error message
@@ -79,7 +84,7 @@ Malformed packets are ignored.
 ### Client (`client.py`)
 
 1. Generates random 32-bit `connection_id`
-2. Sends `REQUEST` up to 3 attempts (2s timeout each)
+2. Sends `REQUEST` up to 3 attempts (2s timeout each); the REQUEST payload carries the client-chosen `segment_size` (4 bytes big-endian) followed by the UTF-8 filename
 3. Expects first valid response from server with matching `connection_id`
 4. On each `DATA` packet:
 	- validates sender and `connection_id`
@@ -94,11 +99,12 @@ Malformed packets are ignored.
 1. Listens for `REQUEST` packets
 2. Validates requested filename in `files/sent/`
 3. If missing: sends `ERROR` (`"file not found"`)
-4. Splits file into chunks of `--segment-size`
-5. Sends one `DATA` packet and waits for correct `ACK`
-6. On timeout (2s): retransmits same `DATA`
-7. Sequence number alternates using XOR (`seq ^= 1`)
-8. After final packet ACK, holds transfer state for 3 seconds:
+4. Reads `segment_size` from the REQUEST payload (client-configured)
+5. Splits file into chunks of that size
+6. Sends one `DATA` packet and waits for correct `ACK`
+7. On timeout (2s): retransmits same `DATA`
+8. Sequence number alternates using XOR (`seq ^= 1`)
+9. After final packet ACK, holds transfer state for 3 seconds:
 	- duplicate final ACK -> resend final DATA
 	- duplicate REQUEST for same file and connection -> resend final DATA
 
@@ -129,7 +135,7 @@ mkdir -p files/sent files/received
 Run server:
 
 ```bash
-python3 server.py 9000 --segment-size 512
+python3 server.py 9000
 ```
 
 Run client (new terminal):
@@ -145,7 +151,7 @@ Equivalent shortcut commands are listed in `runme.sh`.
 Server:
 
 ```bash
-python3 server.py <port> --segment-size <bytes>
+python3 server.py <port>
 ```
 
 Client:
@@ -156,8 +162,8 @@ python3 client.py <server_ip> <port> <filename> --segment-size <bytes>
 
 Notes:
 
+- `--segment-size` is configured by the **client** and sent to the server inside the `REQUEST` packet
 - `--segment-size` must be greater than 0
-- Client and server should use the same segment size for expected behavior in this implementation
 
 ## Validation
 
@@ -204,7 +210,7 @@ python3 result_validator/validator.py
 
 ### Flow
 1. Connection setup
-The client generates a random 32-bit conn_id, packs a REQUEST packet containing the filename, and sends it to the server. It retries up to 3 times with a 2-second timeout if it doesn't hear back.
+The client generates a random 32-bit conn_id, packs a REQUEST packet containing the client-chosen segment_size (4 bytes big-endian) followed by the filename, and sends it to the server. It retries up to 3 times with a 2-second timeout if it doesn't hear back.
 2. Server receives the request
 The server sits in a blocking loop (settimeout(None)) until a packet arrives. It unpacks it, confirms it's a REQUEST, and looks up the file. If the file doesn't exist, it sends back an ERROR packet and returns to listening. If it does exist, it reads the entire file into memory and splits it into fixed-size chunks based on segment_size.
 3. Data transfer (chunk by chunk)
@@ -215,3 +221,77 @@ The client also tracks consecutive timeouts — if it doesn't receive any data f
 The last chunk is sent with is_final=True. When the client sees this flag, it writes the data, sends the ACK, and exits.
 The server, after receiving the final ACK, enters hold_final_state — it lingers for 3 seconds to handle edge cases. If the client's final ACK was lost and the client retransmits a duplicate ACK or re-sends the original REQUEST, the server re-sends the final DATA packet so the client can complete. After the hold expires, the server goes back to its main loop, ready for the next client.
 In short: client requests → server streams chunks one at a time → each chunk is ACK'd before the next is sent → alternating sequence numbers (0, 1, 0, 1…) detect duplicates → final-state hold handles lost last-ACK scenarios.
+
+---
+
+## Web Frontend
+
+A small Flask-based web UI lets you interact with the protocol visually from a browser.
+
+### Features
+
+- **Start / stop** the UDP server with a single click
+- **Request file transfers** by selecting a file and setting segment size
+- **Live log console** — server and client output streamed in real-time via SSE
+- **Packet flow visualiser** — animated dots show REQUEST → DATA → ACK direction
+- **Session stats** — counts of DATA packets sent, ACKs, retransmits, and completed transfers
+
+### Screenshot
+
+![UDP Reliable File Transfer – Web Demo](https://github.com/user-attachments/assets/d23d722c-a32a-4a22-b804-f7fed56bfa0f)
+
+### Setup
+
+Install the frontend dependency (Flask):
+
+```bash
+pip install -r frontend/requirements.txt
+```
+
+Or use a virtual environment:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r frontend/requirements.txt
+```
+
+Make sure the file directories exist:
+
+```bash
+mkdir -p files/sent files/received
+```
+
+Place at least one file in `files/sent/` to transfer:
+
+```bash
+echo "Hello, UDP!" > files/sent/hello.txt
+```
+
+### Running the frontend
+
+```bash
+python3 frontend/app.py
+```
+
+Then open your browser at **http://127.0.0.1:5000**.
+
+Optional flags:
+
+```bash
+python3 frontend/app.py --host 0.0.0.0 --port 8080 --debug
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--host` | `127.0.0.1` | Bind address for the web server |
+| `--port` | `5000` | Port for the web server |
+| `--debug` | off | Enable Flask debug/reload mode |
+
+### Usage
+
+1. Open the browser UI at the address above.
+2. Under **Server**, set a UDP port and click **Start Server**.
+3. Under **Transfer**, choose a file from `files/sent/`, set segment size, and click **Request Transfer**.
+4. Watch the **Live Logs** pane and the **Packet Flow** animation update in real time.
+5. Received files land in `files/received/` as usual.
