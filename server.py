@@ -35,6 +35,25 @@ def split_into_chunks(data: bytes, chunk_size: int) -> list[bytes]:
     return [data[i : i + chunk_size] for i in range(0, len(data), chunk_size)]
 
 
+def parse_request_payload(payload: bytes):
+    """
+    Extract segment_size and filename from a REQUEST packet payload.
+
+    The payload format is: [4-byte big-endian segment_size][UTF-8 filename]
+
+    Returns:
+        tuple (segment_size, filename) on success, or None if the payload is invalid.
+    """
+    if len(payload) < 4:
+        return None
+    segment_size = int.from_bytes(payload[:4], "big")
+    try:
+        filename = payload[4:].decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    return segment_size, filename
+
+
 def run_server(port: int, serve_dir: str):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -71,13 +90,15 @@ def handle_request(
         log(f"Ignoring unexpected message type: {message_type.name}")
         return
 
-    if len(payload) < 4:
-        log("Ignoring REQUEST with payload too short to contain segment size")
+    parsed = parse_request_payload(payload)
+    if parsed is None:
+        log(
+            "Ignoring REQUEST with payload too short "
+            "(expected at least 4 bytes for segment size)"
+        )
         return
 
-    segment_size = int.from_bytes(payload[:4], "big")
-    filename = payload[4:].decode("utf-8")
-
+    segment_size, filename = parsed
     if segment_size <= 0:
         log(f"Ignoring REQUEST with invalid segment size: {segment_size}")
         return
@@ -238,14 +259,11 @@ def hold_final_state(
                 sock.sendto(final_data_packet, client_addr)
 
         elif msg_type == MESSAGE_TYPES.REQUEST:
-            if len(payload) < 4:
+            parsed = parse_request_payload(payload)
+            if parsed is None:
                 continue
 
-            try:
-                requested_name = payload[4:].decode("utf-8")
-            except UnicodeDecodeError:
-                continue
-
+            _, requested_name = parsed
             if requested_name == filename:
                 log("Duplicate REQUEST received, resending final DATA")
                 sock.sendto(final_data_packet, client_addr)
