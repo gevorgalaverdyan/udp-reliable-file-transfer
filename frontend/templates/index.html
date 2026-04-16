@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UDP Reliable File Transfer – Demo</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f1117;
+      --panel:     #1a1d27;
+      --border:    #2d3148;
+      --accent:    #4f8ef7;
+      --accent2:   #7c3aed;
+      --green:     #22c55e;
+      --red:       #ef4444;
+      --yellow:    #eab308;
+      --text:      #e2e8f0;
+      --muted:     #64748b;
+      --server:    #60a5fa;
+      --client:    #a78bfa;
+      --system:    #94a3b8;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ─────────────────────────────────────────────── */
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 2rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    header h1 { font-size: 1.25rem; font-weight: 700; letter-spacing: .02em; }
+    header p  { color: var(--muted); font-size: .85rem; margin-left: auto; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: .35rem;
+      padding: .2rem .6rem;
+      border-radius: 9999px;
+      font-size: .75rem;
+      font-weight: 600;
+      letter-spacing: .05em;
+      border: 1px solid;
+    }
+    .badge-green  { color: var(--green);  border-color: var(--green);  background: #052e16; }
+    .badge-red    { color: var(--red);    border-color: var(--red);    background: #450a0a; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+    /* ── Main layout ─────────────────────────────────────────── */
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 0;
+      overflow: hidden;
+      height: calc(100vh - 60px);
+    }
+
+    /* ── Side panel ──────────────────────────────────────────── */
+    .sidebar {
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: .75rem;
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: .9rem;
+    }
+    .card-title {
+      font-size: .8rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .25rem; }
+
+    input[type=number], input[type=text], select {
+      width: 100%;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: .5rem;
+      color: var(--text);
+      padding: .5rem .75rem;
+      font-size: .9rem;
+      outline: none;
+      transition: border-color .15s;
+    }
+    input[type=number]:focus, input[type=text]:focus, select:focus {
+      border-color: var(--accent);
+    }
+    select option { background: var(--panel); }
+
+    button {
+      width: 100%;
+      padding: .6rem 1rem;
+      border: none;
+      border-radius: .5rem;
+      font-size: .9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity .15s, transform .1s;
+    }
+    button:active { transform: scale(.98); }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+
+    .btn-primary { background: var(--accent);  color: #fff; }
+    .btn-danger  { background: var(--red);     color: #fff; }
+    .btn-success { background: var(--green);   color: #000; }
+    .btn-neutral { background: var(--border);  color: var(--text); }
+
+    /* ── Packet animation ────────────────────────────────────── */
+    .protocol-visual {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .5rem;
+      position: relative;
+    }
+    .node {
+      flex: 0 0 auto;
+      width: 72px;
+      text-align: center;
+    }
+    .node-box {
+      border: 2px solid;
+      border-radius: .5rem;
+      padding: .4rem .2rem;
+      font-size: .7rem;
+      font-weight: 700;
+      letter-spacing: .06em;
+    }
+    .node-client .node-box { border-color: var(--client); color: var(--client); }
+    .node-server .node-box { border-color: var(--server); color: var(--server); }
+    .node-label { font-size: .65rem; color: var(--muted); margin-top: .2rem; }
+
+    .arrow-track {
+      flex: 1;
+      position: relative;
+      height: 30px;
+      display: flex;
+      align-items: center;
+    }
+    .arrow-line {
+      position: absolute;
+      inset: 0 0 0 0;
+      display: flex;
+      align-items: center;
+    }
+    .arrow-line::before {
+      content: '';
+      display: block;
+      height: 2px;
+      width: 100%;
+      background: var(--border);
+    }
+
+    .packet-dot {
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      top: 50%;
+      transform: translateY(-50%);
+      left: 0%;
+      opacity: 0;
+      transition: none;
+    }
+    .packet-dot.animate-ltr {
+      animation: fly-ltr .6s ease-in-out forwards;
+    }
+    .packet-dot.animate-rtl {
+      animation: fly-rtl .6s ease-in-out forwards;
+    }
+    @keyframes fly-ltr {
+      0%   { left: 0%;   opacity: 1; }
+      100% { left: 100%; opacity: 1; }
+    }
+    @keyframes fly-rtl {
+      0%   { left: 100%; opacity: 1; }
+      100% { left: 0%;   opacity: 1; }
+    }
+    .packet-req   { background: var(--yellow); }
+    .packet-data  { background: var(--accent); }
+    .packet-ack   { background: var(--green);  }
+    .packet-error { background: var(--red);    }
+
+    .packet-label {
+      position: absolute;
+      top: -16px;
+      font-size: .6rem;
+      font-weight: 700;
+      white-space: nowrap;
+      color: var(--text);
+    }
+
+    /* ── Stats bar ───────────────────────────────────────────── */
+    .stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: .5rem;
+    }
+    .stat-box {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: .5rem;
+      padding: .6rem .75rem;
+    }
+    .stat-label { font-size: .65rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+    .stat-value { font-size: 1.3rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .stat-value.green  { color: var(--green); }
+    .stat-value.blue   { color: var(--accent); }
+    .stat-value.purple { color: var(--client); }
+
+    /* ── Log console ─────────────────────────────────────────── */
+    .log-pane {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .log-header {
+      padding: .75rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+    }
+    .log-header h2 { font-size: .9rem; font-weight: 700; }
+
+    .log-controls { margin-left: auto; display: flex; gap: .5rem; }
+    .log-controls button {
+      width: auto;
+      padding: .3rem .8rem;
+      font-size: .78rem;
+    }
+
+    #log-output {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1rem 1.5rem;
+      font-family: 'Cascadia Code', 'Fira Mono', monospace;
+      font-size: .78rem;
+      line-height: 1.6;
+    }
+
+    .log-line { display: flex; gap: .6rem; align-items: baseline; }
+    .log-ts   { color: var(--muted); white-space: nowrap; flex: 0 0 auto; }
+    .log-tag  { font-weight: 700; flex: 0 0 56px; text-align: right; }
+    .log-tag.SERVER { color: var(--server); }
+    .log-tag.CLIENT { color: var(--client); }
+    .log-tag.SYSTEM { color: var(--system); }
+    .log-msg  { color: var(--text); word-break: break-all; }
+
+    /* ── Toast ───────────────────────────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: .6rem;
+      padding: .75rem 1.25rem;
+      font-size: .85rem;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .3s;
+      max-width: 320px;
+      z-index: 999;
+    }
+    #toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>⚡ UDP Reliable File Transfer</h1>
+  <span id="server-badge" class="badge badge-red"><span class="dot"></span>SERVER OFF</span>
+  <p>Stop-and-Wait ARQ · Visual Demo</p>
+</header>
+
+<main>
+  <!-- ── Sidebar ─────────────────────────────────────── -->
+  <aside class="sidebar">
+
+    <!-- Server control -->
+    <div class="card">
+      <div class="card-title">🖥 Server</div>
+      <div>
+        <label for="srv-port">UDP Port</label>
+        <input id="srv-port" type="number" value="9000" min="1024" max="65535" />
+      </div>
+      <button id="btn-start-srv" class="btn-success" onclick="startServer()">Start Server</button>
+      <button id="btn-stop-srv"  class="btn-danger"  onclick="stopServer()" disabled>Stop Server</button>
+    </div>
+
+    <!-- Protocol visualisation -->
+    <div class="card">
+      <div class="card-title">📡 Packet Flow</div>
+      <div class="protocol-visual" id="proto-visual">
+        <div class="node node-client">
+          <div class="node-box">CLIENT</div>
+          <div class="node-label">sender</div>
+        </div>
+        <div class="arrow-track" id="arrow-track">
+          <div class="arrow-line"></div>
+          <div class="packet-dot" id="packet-dot"></div>
+          <div class="packet-label" id="packet-label" style="display:none"></div>
+        </div>
+        <div class="node node-server">
+          <div class="node-box">SERVER</div>
+          <div class="node-label">receiver</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="card">
+      <div class="card-title">📊 Session Stats</div>
+      <div class="stats">
+        <div class="stat-box">
+          <div class="stat-label">DATA sent</div>
+          <div class="stat-value blue"  id="stat-data">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">ACKs</div>
+          <div class="stat-value green" id="stat-ack">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Retransmits</div>
+          <div class="stat-value" style="color:var(--yellow)" id="stat-retx">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Transfers</div>
+          <div class="stat-value purple" id="stat-xfer">0</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Transfer control -->
+    <div class="card">
+      <div class="card-title">📂 Transfer</div>
+      <div>
+        <label for="xfer-ip">Server IP</label>
+        <input id="xfer-ip" type="text" value="127.0.0.1" />
+      </div>
+      <div>
+        <label for="xfer-port">Port</label>
+        <input id="xfer-port" type="number" value="9000" min="1024" max="65535" />
+      </div>
+      <div>
+        <label for="xfer-file">File <button class="btn-neutral" onclick="refreshFiles()" aria-label="Refresh file list" style="width:auto;padding:.15rem .5rem;font-size:.7rem;margin-left:.4rem">↻</button></label>
+        <select id="xfer-file"></select>
+      </div>
+      <div>
+        <label for="xfer-seg">Segment Size (bytes)</label>
+        <input id="xfer-seg" type="number" value="512" min="1" max="65000" />
+      </div>
+      <button id="btn-transfer" class="btn-primary" onclick="startTransfer()">Request Transfer</button>
+    </div>
+
+  </aside>
+
+  <!-- ── Log pane ─────────────────────────────────────── -->
+  <section class="log-pane">
+    <div class="log-header">
+      <h2>Live Logs</h2>
+      <div style="display:flex;gap:.5rem;align-items:center;margin-left:.5rem;">
+        <span id="conn-status" style="font-size:.75rem;color:var(--muted)">⬤ connecting…</span>
+      </div>
+      <div class="log-controls">
+        <button class="btn-neutral" onclick="toggleScroll()" id="btn-scroll">Auto-scroll ON</button>
+        <button class="btn-neutral" onclick="clearLogs()">Clear</button>
+      </div>
+    </div>
+    <div id="log-output"></div>
+  </section>
+</main>
+
+<div id="toast"></div>
+
+<script>
+  // ── State ──────────────────────────────────────────────────────────────
+  let autoScroll   = true;
+  let serverRunning = false;
+  let statsData    = 0, statsAck = 0, statsRetx = 0, statsXfer = 0;
+  let animBusy     = false;
+  let evtSource    = null;
+
+  // ── SSE log stream ─────────────────────────────────────────────────────
+  function connectSSE() {
+    if (evtSource) { evtSource.close(); }
+    evtSource = new EventSource('/api/logs');
+    evtSource.onopen = () => {
+      document.getElementById('conn-status').textContent = '⬤ connected';
+      document.getElementById('conn-status').style.color = 'var(--green)';
+    };
+    evtSource.onerror = () => {
+      document.getElementById('conn-status').textContent = '⬤ disconnected';
+      document.getElementById('conn-status').style.color = 'var(--red)';
+      setTimeout(connectSSE, 3000);
+    };
+    evtSource.onmessage = (e) => {
+      const { label, line } = JSON.parse(e.data);
+      appendLog(label, line);
+      handleLogLine(label, line);
+    };
+  }
+
+  function appendLog(label, line) {
+    const out = document.getElementById('log-output');
+    const ts  = new Date().toLocaleTimeString('en-US', { hour12: false });
+
+    const div = document.createElement('div');
+    div.className = 'log-line';
+    div.innerHTML = `
+      <span class="log-ts">${ts}</span>
+      <span class="log-tag ${label}">[${label}]</span>
+      <span class="log-msg">${escHtml(line)}</span>`;
+    out.appendChild(div);
+
+    if (autoScroll) out.scrollTop = out.scrollHeight;
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ── Parse log lines to drive stats + animation ─────────────────────────
+  function handleLogLine(label, line) {
+    if (label === 'SERVER') {
+      if (line.includes('Sent DATA packet')) {
+        statsData++;
+        updateStats();
+        animatePacket('ltr', 'DATA', 'data');
+      }
+      if (line.includes('Timeout waiting for ACK') || line.includes('retransmitting')) {
+        statsRetx++;
+        updateStats();
+        animatePacket('ltr', 'RETX', 'data');
+      }
+      if (line.includes('Sent ERROR')) {
+        animatePacket('ltr', 'ERR', 'error');
+      }
+    }
+
+    if (label === 'CLIENT') {
+      if (line.includes('Sent REQUEST')) {
+        animatePacket('rtl', 'REQ', 'req');
+      }
+      if (line.includes('ACK')) {
+        statsAck++;
+        updateStats();
+        animatePacket('rtl', 'ACK', 'ack');
+      }
+      if (line.includes('transfer complete')) {
+        statsXfer++;
+        updateStats();
+        toast('✅ Transfer complete!', 3000);
+      }
+    }
+
+    if (label === 'SYSTEM') {
+      if (line.includes('Server stopped')) {
+        setServerState(false);
+      }
+    }
+  }
+
+  // ── Packet animation ───────────────────────────────────────────────────
+  const ANIM_QUEUE = [];
+
+  function animatePacket(dir, labelText, type) {
+    ANIM_QUEUE.push({ dir, labelText, type });
+    if (!animBusy) drainQueue();
+  }
+
+  function drainQueue() {
+    if (ANIM_QUEUE.length === 0) { animBusy = false; return; }
+    animBusy = true;
+    const { dir, labelText, type } = ANIM_QUEUE.shift();
+    const dot = document.getElementById('packet-dot');
+    const lbl = document.getElementById('packet-label');
+
+    dot.className = `packet-dot packet-${type}`;
+    dot.style.left = dir === 'ltr' ? '0%' : '100%';
+    lbl.textContent = labelText;
+    lbl.style.display = 'block';
+    lbl.style.left = dir === 'ltr' ? '0%' : 'auto';
+    lbl.style.right = dir === 'rtl' ? '0%' : 'auto';
+
+    // force reflow
+    void dot.offsetWidth;
+    dot.classList.add(dir === 'ltr' ? 'animate-ltr' : 'animate-rtl');
+
+    dot.addEventListener('animationend', function handler() {
+      dot.removeEventListener('animationend', handler);
+      dot.className = 'packet-dot';
+      lbl.style.display = 'none';
+      setTimeout(drainQueue, 80);
+    }, { once: true });
+  }
+
+  // ── Stats ──────────────────────────────────────────────────────────────
+  function updateStats() {
+    document.getElementById('stat-data').textContent = statsData;
+    document.getElementById('stat-ack').textContent  = statsAck;
+    document.getElementById('stat-retx').textContent = statsRetx;
+    document.getElementById('stat-xfer').textContent = statsXfer;
+  }
+
+  // ── Server control ─────────────────────────────────────────────────────
+  async function startServer() {
+    const port = parseInt(document.getElementById('srv-port').value);
+    const res  = await fetch('/api/server/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ port }),
+    });
+    const data = await res.json();
+    if (data.status === 'started' || data.status === 'already_running') {
+      setServerState(true);
+      toast(`🖥 Server running on port ${port}`, 2500);
+    }
+  }
+
+  async function stopServer() {
+    await fetch('/api/server/stop', { method: 'POST' });
+    setServerState(false);
+    toast('🛑 Server stopped', 2000);
+  }
+
+  function setServerState(running) {
+    serverRunning = running;
+    const badge = document.getElementById('server-badge');
+    badge.className = running ? 'badge badge-green' : 'badge badge-red';
+    badge.innerHTML = running
+      ? '<span class="dot"></span>SERVER ON'
+      : '<span class="dot"></span>SERVER OFF';
+    document.getElementById('btn-start-srv').disabled = running;
+    document.getElementById('btn-stop-srv').disabled  = !running;
+  }
+
+  // ── Transfer ───────────────────────────────────────────────────────────
+  async function startTransfer() {
+    const filename = document.getElementById('xfer-file').value;
+    if (!filename) { toast('⚠️ Pick a file first', 2000); return; }
+
+    const body = {
+      server_ip:    document.getElementById('xfer-ip').value,
+      port:         parseInt(document.getElementById('xfer-port').value),
+      filename,
+      segment_size: parseInt(document.getElementById('xfer-seg').value),
+    };
+
+    const btn = document.getElementById('btn-transfer');
+    btn.disabled = true;
+    btn.textContent = 'Transferring…';
+
+    await fetch('/api/transfer', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(body),
+    });
+
+    setTimeout(() => {
+      btn.disabled = false;
+      btn.textContent = 'Request Transfer';
+    }, 1500);
+  }
+
+  // ── File list ──────────────────────────────────────────────────────────
+  async function refreshFiles() {
+    const res  = await fetch('/api/files');
+    const data = await res.json();
+    const sel  = document.getElementById('xfer-file');
+    sel.innerHTML = '';
+    if (data.files.length === 0) {
+      sel.innerHTML = '<option value="">— no files in files/sent/ —</option>';
+    } else {
+      data.files.forEach(f => {
+        const opt = document.createElement('option');
+        opt.value = opt.textContent = f;
+        sel.appendChild(opt);
+      });
+    }
+  }
+
+  // ── Log controls ───────────────────────────────────────────────────────
+  function toggleScroll() {
+    autoScroll = !autoScroll;
+    document.getElementById('btn-scroll').textContent =
+      autoScroll ? 'Auto-scroll ON' : 'Auto-scroll OFF';
+  }
+  function clearLogs() {
+    document.getElementById('log-output').innerHTML = '';
+    statsData = statsAck = statsRetx = statsXfer = 0;
+    updateStats();
+  }
+
+  // ── Toast ──────────────────────────────────────────────────────────────
+  let toastTimer;
+  function toast(msg, ms = 2500) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), ms);
+  }
+
+  // ── Init ───────────────────────────────────────────────────────────────
+  async function init() {
+    connectSSE();
+    await refreshFiles();
+    // sync server status
+    const r = await fetch('/api/server/status');
+    const d = await r.json();
+    if (d.running) setServerState(true);
+  }
+
+  init();
+</script>
+</body>
+</html>

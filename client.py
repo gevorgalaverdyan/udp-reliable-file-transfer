@@ -38,8 +38,9 @@ def rcv_file(server_ip: str, port: int, filename: str, segment_size: int):
         f"(segment_size={segment_size})"
     )
 
+    req_payload = segment_size.to_bytes(4, "big") + filename.encode()
     req_packet = pack_packet(
-        conn_id, 0, MESSAGE_TYPES.REQUEST, False, filename.encode()
+        conn_id, 0, MESSAGE_TYPES.REQUEST, False, req_payload
     )
 
     expected_seq = 0

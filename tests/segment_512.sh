@@ -5,7 +5,7 @@ yes "This is a UDP stop-and-wait test file." | head -n 200 > files/sent/test.txt
 wc -c files/sent/test.txt
 
 # SERVER
-python server.py 9000 --segment-size 512
+python server.py 9000
 
 # RECEIVER
 python client.py 127.0.0.1 9000 test.txt --segment-size 512
